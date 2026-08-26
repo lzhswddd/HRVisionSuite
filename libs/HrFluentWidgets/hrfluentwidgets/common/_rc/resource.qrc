@@ -1,0 +1,16 @@
+﻿<RCC>
+    <qresource prefix="/hricon">
+        <file>icons/HRLogo_black.svg</file>
+        <file>icons/HRLogo_white.svg</file>
+        <file>icons/Mouse_black.svg</file>
+        <file>icons/Mouse_white.svg</file>
+        <file>icons/Polygon_black.svg</file>
+        <file>icons/Polygon_white.svg</file>
+        <file>icons/Rectangle_black.svg</file>
+        <file>icons/Rectangle_white.svg</file>
+    </qresource>
+    <qresource prefix="/resource">
+        <file>images/color_picker/HuePanel.png</file>
+        <file>images/noImage.svg</file>
+    </qresource>
+</RCC>

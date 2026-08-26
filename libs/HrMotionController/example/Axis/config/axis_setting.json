@@ -1,0 +1,39 @@
+{
+    "Axis": {
+        "Axis Name": {
+            "1": "X轴",
+            "2": "Y轴",
+            "3": "Z轴"
+        },
+        "Pulse Equivalent": {},
+        "Max Velocity": {},
+        "Acceleration": {},
+        "Deceleration": {},
+        "S-Ramp": {},
+        "Min Position": {
+            "X轴": -1000.0,
+            "Y轴": -1000.0,
+            "Z轴": -1000.0
+        },
+        "Max Position": {
+            "X轴": 1000.0,
+            "Y轴": 1000.0,
+            "Z轴": 1000.0
+        },
+        "Decimal Places": {
+            "X轴": 2,
+            "Y轴": 2,
+            "Z轴": 2
+        },
+        "Single Step": {
+            "X轴": 0.1,
+            "Y轴": 0.1,
+            "Z轴": 0.1
+        },
+        "Distance Unit": {
+            "X轴": "mm",
+            "Y轴": "mm",
+            "Z轴": "mm"
+        }
+    }
+}

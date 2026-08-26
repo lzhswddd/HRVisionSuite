@@ -19,6 +19,7 @@ setup(
         'Operating System :: OS Independent',
     ],
     install_requires=[
+        # 库依赖
         'pycryptodome',
         'numpy',
         'psutil',
@@ -26,6 +27,10 @@ setup(
         'PySide6',
         'PySide6-Fluent-Widgets',
         'pandas',
+        # 例程依赖
+        'opencv-python',
+        'ultralytics',
+        'pymodbus',
     ],
     python_requires='>=3.12',
 )

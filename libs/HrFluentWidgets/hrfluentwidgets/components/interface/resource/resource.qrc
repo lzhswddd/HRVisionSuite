@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/interface">
+        <file>qss/dark/setting_interface.qss</file>
+        <file>qss/light/setting_interface.qss</file>
+   </qresource>
+</RCC>

@@ -1,0 +1,6 @@
+build/
+HRVision.egg-info/
+.vscode/
+__pycache__/
+.hobj
+.json

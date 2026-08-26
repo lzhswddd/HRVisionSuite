@@ -14,6 +14,9 @@ Requires-Dist: wmi
 Requires-Dist: PySide6
 Requires-Dist: PySide6-Fluent-Widgets
 Requires-Dist: pandas
+Requires-Dist: opencv-python
+Requires-Dist: ultralytics
+Requires-Dist: pymodbus
 Dynamic: author
 Dynamic: classifier
 Dynamic: requires-dist

@@ -12,8 +12,8 @@ if "%1"=="" (set PY=python) else (set PY=%1)
 set EXAMPLES_DIR=D:\HRVisionExamples
 
 echo [1/3] Installing libraries ...
-%PY% -m pip install "%SUITE%..\PyHRVision" "%SUITE%..\HrFluentWidgets" ^
-    "%SUITE%..\HrMotionController" "%SUITE%..\PLCInterface" "%SUITE%."
+%PY% -m pip install "%SUITE%libs\PyHRVision" "%SUITE%libs\HrFluentWidgets" ^
+    "%SUITE%libs\HrMotionController" "%SUITE%libs\PLCInterface" "%SUITE%."
 if errorlevel 1 goto :fail
 
 echo [2/3] Deploying examples to %EXAMPLES_DIR% ...

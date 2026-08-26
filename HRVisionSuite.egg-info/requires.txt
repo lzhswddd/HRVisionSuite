@@ -5,3 +5,6 @@ wmi
 PySide6
 PySide6-Fluent-Widgets
 pandas
+opencv-python
+ultralytics
+pymodbus

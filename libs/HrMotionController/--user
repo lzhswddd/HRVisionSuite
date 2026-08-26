@@ -1,0 +1,23 @@
+Processing d:\python\frame\package\hrmotioncontroller
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: HrMotionController
+  Building wheel for HrMotionController (pyproject.toml): started
+  Building wheel for HrMotionController (pyproject.toml): finished with status 'done'
+  Created wheel for HrMotionController: filename=hrmotioncontroller-0.2.0-py3-none-any.whl size=3543703 sha256=c6bf369ad0f786db329055f445ef3c0eab30ece65520ead59664029e17439819
+  Stored in directory: C:\Users\lzh\AppData\Local\Temp\pip-ephem-wheel-cache-_99g7whc\wheels\c4\8d\5c\e92cc795a675ec586a47d98ff43cf93d98357c95199ff3009f
+Successfully built HrMotionController
+Installing collected packages: HrMotionController
+  Attempting uninstall: HrMotionController
+    Found existing installation: HrMotionController 0.2.0
+    Uninstalling HrMotionController-0.2.0:
+      Successfully uninstalled HrMotionController-0.2.0
+  Rolling back uninstall of HrMotionController
+  Moving to c:\users\lzh\appdata\roaming\python\python312\site-packages\hrmotioncontroller-0.2.0.dist-info\
+   from C:\Users\lzh\AppData\Roaming\Python\Python312\site-packages\~rmotioncontroller-0.2.0.dist-info
+  Moving to c:\users\lzh\appdata\roaming\python\python312\site-packages\hrmotioncontroller\
+   from C:\Users\lzh\AppData\Roaming\Python\Python312\site-packages\~rmotioncontroller
