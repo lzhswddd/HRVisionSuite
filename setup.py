@@ -24,6 +24,7 @@ setup(
         'numpy',
         'psutil',
         'wmi',
+        'cryptography',
         'PySide6',
         'PySide6-Fluent-Widgets',
         'pandas',
