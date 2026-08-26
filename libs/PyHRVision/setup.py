@@ -17,7 +17,8 @@ setup(
         'pycryptodome',
         'numpy',
         'psutil',
-        'wmi'
+        'wmi',
+        'cryptography'
     ],
     python_requires='>=3.9',    
     package_data={
