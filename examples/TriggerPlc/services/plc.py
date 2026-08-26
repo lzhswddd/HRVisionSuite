@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""PLC 通信：cModule/PLCInterface 库（PLCDevice.dll + HslCommunication.dll 封装）。
+"""PLC 通信：PLCInterface 包（PLCDevice.dll + HslCommunication.dll 封装）。
 
 支持协议（plc_type，见 PLCDevice.h）：Modbus / ModbusRtu / ModbusAscii /
 Profinet_Siemens_S200Smart / Profinet_Melsec_Mc / Profinet_Omron_Fins 等。
 
-DLL 依赖目录（pyd 所在，可用环境变量 PLC_LIB_DIR 覆盖）：
-    d:/Python/cModule/PLCInterface/build/bin/Release/
-    PLCInterface.pyd / PLCDevice.dll / HslCommunication.dll / lua.dll / toluapp.dll
+加载方式（按优先级）：
+    1. pip 包 PLCInterface（HRVisionSuite 一键部署安装；包 __init__ 已处理
+       DLL 搜索路径——C# 的 HslCommunication.dll 不随标准 DLL 搜索，必须显式注入）
+    2. 源码构建目录（环境变量 PLC_LIB_DIR 覆盖，如
+       D:/Python/cModule/PLCInterface/build/bin/Release）
 
 地址语义（HslCommunication）：
     "0".."n"    Modbus 线圈/寄存器（十进制地址）
@@ -28,7 +30,12 @@ _PLC_DIR: str = os.environ.get(
 
 
 def _ensure_lib() -> None:
-    """把 PLCInterface.pyd 目录加入搜索路径（pyd 与依赖 DLL 同目录）。"""
+    """优先 pip 包 PLCInterface（自带 DLL 路径处理）；否则用源码构建目录。"""
+    try:
+        import PLCInterface   # noqa: F401  包 __init__ 已注入 DLL 搜索路径
+        return
+    except ImportError:
+        pass
     if _PLC_DIR not in sys.path:
         sys.path.insert(0, _PLC_DIR)
     if os.path.isdir(_PLC_DIR):
