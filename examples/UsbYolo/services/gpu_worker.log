@@ -1,0 +1,73 @@
+--- Logging error ---
+Traceback (most recent call last):
+  File "D:\AIProgram\lib\logging\__init__.py", line 1086, in emit
+    stream.write(msg + self.terminator)
+OSError: [Errno 22] Invalid argument
+Call stack:
+  File "D:\Python\frame\Flow\example\UsbYolo\services\gpu_worker.py", line 94, in <module>
+    main()
+  File "D:\Python\frame\Flow\example\UsbYolo\services\gpu_worker.py", line 56, in main
+    from ultralytics import YOLO
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\__init__.py", line 11, in <module>
+    from ultralytics.models import NAS, RTDETR, SAM, YOLO, FastSAM, YOLOWorld
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\models\__init__.py", line 3, in <module>
+    from .fastsam import FastSAM
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\models\fastsam\__init__.py", line 3, in <module>
+    from .model import FastSAM
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\models\fastsam\model.py", line 5, in <module>
+    from ultralytics.engine.model import Model
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\engine\model.py", line 11, in <module>
+    from ultralytics.cfg import TASK2DATA, get_cfg, get_save_dir
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\cfg\__init__.py", line 12, in <module>
+    from ultralytics.utils import (
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "D:\AIProgram\lib\site-packages\ultralytics\utils\__init__.py", line 1287, in <module>
+    SETTINGS = SettingsManager()  # initialize settings
+  File "D:\AIProgram\lib\site-packages\ultralytics\utils\__init__.py", line 1220, in __init__
+    self._validate_settings()
+  File "D:\AIProgram\lib\site-packages\ultralytics\utils\__init__.py", line 1229, in _validate_settings
+    LOGGER.warning(
+Message: "WARNING \u26a0\ufe0f Ultralytics settings reset to default values. This may be due to a possible problem with your settings or a recent ultralytics package update. \nView Ultralytics Settings with 'yolo settings' or at 'C:\\Users\\lzh\\AppData\\Roaming\\Ultralytics\\settings.json'\nUpdate Settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'. For help see https://docs.ultralytics.com/quickstart/#ultralytics-settings."
+Arguments: ()
+Traceback (most recent call last):
+  File "D:\Python\frame\Flow\example\UsbYolo\services\gpu_worker.py", line 94, in <module>
+    main()
+  File "D:\Python\frame\Flow\example\UsbYolo\services\gpu_worker.py", line 60, in main
+    conn, _ = srv.accept()
+  File "D:\AIProgram\lib\socket.py", line 293, in accept
+    fd, addr = self._accept()
+socket.timeout: timed out

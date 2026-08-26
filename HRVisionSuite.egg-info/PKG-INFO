@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: HRVisionSuite
+Version: 1.0.0
+Summary: HRVision 全家桶：框架 + UI + 运动控制 + PLC 库与例程（一键部署）
+Author: HR
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.12
+Requires-Dist: pycryptodome
+Requires-Dist: numpy
+Requires-Dist: psutil
+Requires-Dist: wmi
+Requires-Dist: PySide6
+Requires-Dist: PySide6-Fluent-Widgets
+Requires-Dist: pandas
+Dynamic: author
+Dynamic: classifier
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

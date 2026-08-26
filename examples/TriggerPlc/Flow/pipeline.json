@@ -1,0 +1,59 @@
+{
+  "run_mode": "process",
+  "nodes": [
+    {
+      "id": "grab_0",
+      "flow": "camera",
+      "source": "videos/cam1.avi",
+      "plc_mode": "mock",
+      "plc_type": "Modbus",
+      "plc_host": "127.0.0.1",
+      "plc_port": 8000,
+      "trigger_addr": "0",
+      "ok_addr": "1",
+      "ng_addr": "2",
+      "addr_type": "bool",
+      "auto_trigger_ms": 1000,
+      "display_divisor": 3
+    },
+    {
+      "id": "algo_1",
+      "flow": "algo",
+      "algo_load": 1,
+      "judge_threshold": 0.8,
+      "signal_divisor": 1
+    }
+  ],
+  "channels": [
+    {
+      "id": "ch_grab_0_algo_1",
+      "from": "grab_0",
+      "to": "algo_1",
+      "kind": "queue",
+      "maxlen": 1,
+      "overflow": "drop_oldest"
+    },
+    {
+      "id": "ch_grab_0_origin",
+      "from": "grab_0",
+      "to": "ui",
+      "kind": "shm",
+      "slot": "origin"
+    },
+    {
+      "id": "ch_algo_1_res",
+      "from": "algo_1",
+      "to": "ui",
+      "kind": "shm",
+      "slot": "res"
+    }
+  ],
+  "panes": [
+    {
+      "id": "pane_algo_1",
+      "origin": "ch_grab_0_origin",
+      "res": "ch_algo_1_res",
+      "node": "algo_1"
+    }
+  ]
+}

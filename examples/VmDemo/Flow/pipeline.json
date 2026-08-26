@@ -1,0 +1,58 @@
+{
+  "run_mode": "process",
+  "nodes": [
+    {
+      "id": "grab_0",
+      "flow": "camera",
+      "vm_mode": "sim",
+      "sim_source": "videos/vm1.avi",
+      "sim_fps": 25,
+      "vm_solution": "D:/Python/frame/ProcessTest/Flow/test.sol",
+      "vm_procedure": "",
+      "display_divisor": 3
+    },
+    {
+      "id": "algo_1",
+      "flow": "algo",
+      "vm_mode": "sim",
+      "sim_source": "videos/vm1.avi",
+      "vm_solution": "D:/Python/frame/ProcessTest/Flow/test.sol",
+      "vm_procedure": "",
+      "vm_resource_module": "ImageSource",
+      "vm_device_id": 1,
+      "signal_divisor": 2
+    }
+  ],
+  "channels": [
+    {
+      "id": "ch_grab_0_algo_1",
+      "from": "grab_0",
+      "to": "algo_1",
+      "kind": "queue",
+      "maxlen": 1,
+      "overflow": "drop_oldest"
+    },
+    {
+      "id": "ch_grab_0_origin",
+      "from": "grab_0",
+      "to": "ui",
+      "kind": "shm",
+      "slot": "origin"
+    },
+    {
+      "id": "ch_algo_1_res",
+      "from": "algo_1",
+      "to": "ui",
+      "kind": "shm",
+      "slot": "res"
+    }
+  ],
+  "panes": [
+    {
+      "id": "pane_algo_1",
+      "origin": "ch_grab_0_origin",
+      "res": "ch_algo_1_res",
+      "node": "algo_1"
+    }
+  ]
+}

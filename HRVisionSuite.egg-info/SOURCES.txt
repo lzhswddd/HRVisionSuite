@@ -1,0 +1,7 @@
+README.md
+setup.py
+HRVisionSuite.egg-info/PKG-INFO
+HRVisionSuite.egg-info/SOURCES.txt
+HRVisionSuite.egg-info/dependency_links.txt
+HRVisionSuite.egg-info/requires.txt
+HRVisionSuite.egg-info/top_level.txt

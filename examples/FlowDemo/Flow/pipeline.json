@@ -1,0 +1,52 @@
+{
+  "run_mode": "process",
+  "cam_affinity": null,
+  "algo_affinity": null,
+  "cam_priority": null,
+  "algo_priority": null,
+  "nodes": [
+    {
+      "id": "grabber_1",
+      "flow": "camera",
+      "source": "videos/ccd1.avi"
+    },
+    {
+      "id": "algo_1",
+      "flow": "algo",
+      "algo_load": 1,
+      "signal_divisor": 2
+    }
+  ],
+  "channels": [
+    {
+      "id": "ch_grabber_1_algo_1",
+      "from": "grabber_1",
+      "to": "algo_1",
+      "kind": "queue",
+      "maxlen": 1,
+      "overflow": "drop_oldest"
+    },
+    {
+      "id": "ch_grabber_1_origin",
+      "from": "grabber_1",
+      "to": "ui",
+      "kind": "shm",
+      "slot": "origin"
+    },
+    {
+      "id": "ch_algo_1_res",
+      "from": "algo_1",
+      "to": "ui",
+      "kind": "shm",
+      "slot": "res"
+    }
+  ],
+  "panes": [
+    {
+      "id": "pane_algo_1",
+      "origin": "ch_grabber_1_origin",
+      "res": "ch_algo_1_res",
+      "node": "algo_1"
+    }
+  ]
+}
