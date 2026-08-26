@@ -14,7 +14,7 @@
       "id": "algo_1",
       "flow": "algo",
       "algo_load": 1,
-      "signal_divisor": 2
+      "signal_divisor": 1
     }
   ],
   "channels": [
