@@ -11,6 +11,7 @@ Requires-Dist: pycryptodome
 Requires-Dist: numpy
 Requires-Dist: psutil
 Requires-Dist: wmi
+Requires-Dist: cryptography
 Requires-Dist: PySide6
 Requires-Dist: PySide6-Fluent-Widgets
 Requires-Dist: pandas
