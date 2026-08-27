@@ -16,14 +16,16 @@
     HRAuth.check_license(on_fail=lambda code: log(code))  # 失败回调（code 为本机硬件码或 None）
 
 认证流程（与 HRLicensing 一致）：
-    查找认证文件 → LicenseCheck（注册表优先 → 文件回退 → 通过后写注册表并删除文件）
-    失败时弹窗显示本机硬件码（用户可复制发给厂商注册），倒计时结束后进程退出。
+    查找认证文件 → LicenseCheck（文件优先 → 注册表缓存回退（按项目分槽）→ 通过后写本项目缓存）
+    失败时弹窗显示本机硬件码（base64 编码，不显示明文；用户可复制发给厂商注册），
+    倒计时结束后进程退出。
 
 分发清单（3 个文件放同一目录即可）：
     HRAuth.py
     HRLicenseCheck.cp312-win_amd64.pyd   # 认证核心（Cython 编译，保护认证逻辑）
     HRVision_license_*.lic               # 授权文件（HRLicensingUI 生成）
 """
+import base64
 import glob
 import os
 import sys
@@ -33,6 +35,24 @@ import time
 _DEFAULT_PATTERN = "HRVision_license_*.lic"
 
 _popup_lock = threading.Lock()
+
+# 失败信息是否已展示（核心回调触发后置 True；避免兜底分支重复弹窗）
+_failure_shown = False
+
+
+def _get_hardware_code():
+    """本机硬件码（与认证核心同口径：CPU ID + C 盘物理盘序列号）。"""
+    try:
+        from .ProjectLicense import get_hardware_code
+    except ImportError:
+        try:
+            from HRVision.ProjectLicense import get_hardware_code
+        except ImportError:
+            return ""
+    try:
+        return get_hardware_code()
+    except Exception:
+        return ""
 
 
 def _load_license_check():
@@ -141,9 +161,15 @@ def check_license(pattern=_DEFAULT_PATTERN, exit_on_fail=True, popup=True,
 
     # 注册失败回调：LicenseCheck 校验失败时会先回调（携带本机硬件码），随后终止进程。
     # 在回调中弹窗（mainloop 阻塞），用户看完/倒计时结束 → 关闭弹窗 → 进程退出。
+    global _failure_shown
+    _failure_shown = False
+
     def _on_failed(data, user):
+        global _failure_shown
+        _failure_shown = True
+        # 机器码 base64 编码后展示（不显示明文）；data 为核心回调的原始硬件码 bytes
         try:
-            code = data.decode('utf-8')
+            code = base64.b64encode(data).decode("ascii")
         except Exception:
             code = str(data)
         if on_fail:
@@ -152,7 +178,7 @@ def check_license(pattern=_DEFAULT_PATTERN, exit_on_fail=True, popup=True,
             except Exception:
                 pass
         msg = "License authentication failed. Please verify your license.\n\n" \
-              "license code:\n\n" + code
+              "license code (base64):\n\n" + code
         if popup:
             _show_popup(msg, timeout)
         else:
@@ -182,7 +208,17 @@ def check_license(pattern=_DEFAULT_PATTERN, exit_on_fail=True, popup=True,
     ret = LicenseCheck(license_path, company=company, project=project)
     if ret == 0:
         return True
-    # LicenseCheck 失败时内部已触发回调（弹窗）并终止进程，正常到不了这里；防御性兜底
+    # LicenseCheck 失败时内部已触发回调（弹窗）；若核心被替换/降级导致回调未触发
+    # （_failure_shown 仍为 False），这里兜底展示错误，绝不静默退出。
+    if not _failure_shown:
+        hw = _get_hardware_code()
+        hw_b64 = base64.b64encode(hw.encode("utf-8")).decode("ascii") if hw else ""
+        msg = ("License authentication failed (0x%03X). Please verify your license.\n\n"
+               "license code (base64):\n\n%s" % (ret, hw_b64))
+        if popup:
+            _show_popup(msg, timeout)
+        else:
+            print(msg)
     if exit_on_fail:
         sys.exit(1)
     return False

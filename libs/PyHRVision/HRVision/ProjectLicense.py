@@ -140,6 +140,33 @@ def get_hardware_code() -> str:
 
 
 # ------------------------------------------------------------------
+# 硬件码编解码（展示/传递用 base64——界面不显示明文；payload 内保持原始口径）
+# ------------------------------------------------------------------
+
+def encode_hardware(code):
+    """硬件码 → base64（对外展示/发给厂商用）。"""
+    return base64.b64encode(code.encode("utf-8")).decode("ascii")
+
+
+def decode_hardware(code):
+    """base64 硬件码 → 原始硬件码（厂商签发用）。
+
+    原始硬件码含 ':'（CpuID:xxx|Disk:xxx），base64 字母表不含 ':'——
+    据此区分：含 ':' 视为原始码原样返回；否则尝试 base64 解码并验证。
+    """
+    if ":" in code or "|" in code:
+        return code
+    try:
+        raw = base64.b64decode(code.encode("ascii"))
+        text = raw.decode("utf-8", "replace")
+        if ":" in text:
+            return text
+    except Exception:
+        pass
+    return code
+
+
+# ------------------------------------------------------------------
 # 签发（厂商侧）
 # ------------------------------------------------------------------
 
