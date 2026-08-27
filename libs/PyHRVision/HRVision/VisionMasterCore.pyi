@@ -3,7 +3,101 @@ VisionMasterCore模块
 """
 from __future__ import annotations
 import typing
-__all__ = ['VisionMasterCore']
+__all__ = ['GlobalCameraCore', 'VisionMasterCore']
+class GlobalCameraCore:
+    """
+    全局相机控制类：不经流程直接从相机取图。名称 = 方案中配置的全局相机名；构造前须已 loadSolution，重新 loadSolution 前必须销毁（del/离开作用域）所有 GlobalCameraCore 实例，否则 SDK 工具指针悬空。构造时自动执行出图不触发流程(SetTriggerProcessEnable(false))，可用 setTriggerProcessEnable 改回
+    """
+    def __init__(self, name: str) -> None:
+        """
+        创建全局相机实例
+        """
+    def __repr__(self) -> str:
+        ...
+    def getCameraList(self) -> list:
+        """
+        枚举可用相机列表[{name,sn}]
+        """
+    def getChosenCameraSN(self) -> str:
+        """
+        获取当前绑定相机SN
+        """
+    def getExposureTime(self) -> float:
+        """
+        获取曝光时间(微秒)
+        """
+    def getGain(self) -> float:
+        """
+        获取增益(dB)
+        """
+    def getHeight(self) -> int:
+        """
+        获取图像高度
+        """
+    def getLatestImage(self) -> typing.Any:
+        """
+        立即返回最新帧，无帧返回None
+        """
+    def getPixelFormat(self) -> int:
+        """
+        获取像素格式(MVS编码)
+        """
+    def getTriggerDelay(self) -> float:
+        """
+        获取触发延迟(微秒)
+        """
+    def getTriggerProcessEnable(self) -> bool:
+        """
+        出图是否触发流程运行
+        """
+    def getTriggerSource(self) -> int:
+        """
+        获取触发源
+        """
+    def getWidth(self) -> int:
+        """
+        获取图像宽度
+        """
+    def grabImage(self, timeout_ms: typing.SupportsInt = 5000) -> typing.Any:
+        """
+        阻塞等待下一帧图像，超时返回None；timeout_ms<=0 立即返回
+        """
+    def isConnected(self) -> bool:
+        """
+        相机是否连接
+        """
+    def setChosenCameraSN(self, sn: str) -> None:
+        """
+        切换全局相机绑定的相机SN
+        """
+    def setExposureTime(self, us: typing.SupportsFloat) -> None:
+        """
+        设置曝光时间(微秒)
+        """
+    def setGain(self, db: typing.SupportsFloat) -> None:
+        """
+        设置增益(dB)
+        """
+    def setPixelFormat(self, fmt: typing.SupportsInt) -> None:
+        """
+        设置像素格式(MVS编码)
+        """
+    def setTriggerDelay(self, us: typing.SupportsFloat) -> None:
+        """
+        设置触发延迟(微秒)
+        """
+    def setTriggerProcessEnable(self, enable: bool) -> None:
+        """
+        出图是否触发流程运行
+        """
+    def setTriggerSource(self, source: typing.SupportsInt) -> None:
+        """
+        设置触发源(0=硬触发 1=软触发)
+        """
+    def softwareTrigger(self) -> None:
+        """
+        发一次软触发
+        """
 class VisionMasterCore:
     def DestroyObj(self) -> None:
         """
@@ -87,6 +181,10 @@ class VisionMasterCore:
         """
         保存指定流程
         """
+def _mvs_pixel_info(pixelFormat: typing.SupportsInt) -> tuple[str, int]:
+    """
+    MVS像素格式转(dtype,通道数)
+    """
 __author__: str = 'HRVision'
 __copyright__: str = 'Copyright (c) 2023 HRVision'
 __description__: str = 'VisionMasterCore模块'
