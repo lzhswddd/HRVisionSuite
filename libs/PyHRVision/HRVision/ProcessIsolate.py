@@ -46,8 +46,11 @@ def bootstrap_main(argv=None) -> int:
         import sys
         from HRVision.ProcessIsolate import bootstrap_main
         sys.exit(bootstrap_main())
-    注意：hrf_dir 用 append 兜底（目标环境优先，避免主环境 site-packages 污染——
-    如主环境 torch 2.x 被 py39 子进程误用）；打包产物内框架已在 bundle 中。
+    注意：外部解释器场景**不传 hrf_dir**（目标环境从自己的 site-packages
+    import HRVision，cp 版本自洽——注入主环境 site-packages 会把本版本二进制
+    包混进目标进程导致 Version mismatch）；打包 exe 场景 argv[2]=exe 目录
+    （bundle/HRVision 与之同目录，导入框架前注入）。params["hrf_dir"] 仅兼容
+    旧 pkl 保留读取，无该键时跳过。
     """
     argv = list(sys.argv if argv is None else argv)
     if "--hrflow-bootstrap" in argv:
@@ -238,24 +241,30 @@ def start_external_process(python_exe, getProcess, dir_path, main_process_name,
               "main_process_name": main_process_name,
               "proc_config": {"signals": signals or []},
               "codeDict": codeDict,
-              "conn_addr": listener.address, "kwargs": kwargs or {},
-              # HRVision 包所在目录的父目录（sys.path 需含父目录才能 import HRVision）；
-              # 外部解释器可能不在 site-packages 安装，显式注入
-              "hrf_dir": os.path.dirname(os.path.dirname(
-                  os.path.abspath(sys.modules["HRVision.HRFlowController"].__file__)))}
+              "conn_addr": listener.address, "kwargs": kwargs or {}}
+    # 注意：不要把主环境 HRVision 包父目录（site-packages）注入 params["hrf_dir"]——
+    # 外部解释器是另一个 CPython 版本/环境，主环境 site-packages 里全是本版本
+    # 二进制包（cffi/numpy pyd 等），注入会让 3.9 子进程加载到 3.12 的
+    # 包管理器 api.py + 3.9 的 _cffi_backend → "Version mismatch"（实测必炸）。
+    # 正确语义：外部解释器从**自己的环境** import HRVision（AIP 等目标环境已部署
+    # 对应 cp 版本框架）；只有打包 exe（bundle 自含 HRVision）才需要注入
+    # sys.path（exe 目录），见下方 cmd 构造。
     fd, tmp = tempfile.mkstemp(suffix=".pkl", prefix="hrflow_ext_")
     os.close(fd)
     try:
         with open(tmp, "wb") as f:
             pickle.dump(params, f)
-        # 打包子进程（exe）：走 --hrflow-bootstrap 协议（入口调 bootstrap_main）；
-        # 解释器：python -c 委托 bootstrap_main（同一实现）。
+        # 打包子进程（exe）：走 --hrflow-bootstrap 协议（入口调 bootstrap_main），
+        # argv[2]=exe 所在目录（bundle/HRVision 与之同目录 → 注入 sys.path）；
+        # 解释器：python -c 委托 bootstrap_main（同一实现）——**不注入任何路径**，
+        # HRVision 由目标环境自己的 site-packages 提供（cp 版本自洽）。
         # 注意：python.exe 也以 .exe 结尾 —— 探测确认是解释器才走 -c 协议
         if (not python_exe.lower().endswith(".exe")
                 or _is_python_interpreter(python_exe)):
-            cmd = [python_exe, "-c", _EXT_BOOTSTRAP, tmp, params["hrf_dir"]]  # argv[2]=hrf_dir
+            cmd = [python_exe, "-c", _EXT_BOOTSTRAP, tmp]
         else:
-            cmd = [python_exe, "--hrflow-bootstrap", tmp]
+            cmd = [python_exe, "--hrflow-bootstrap", tmp,
+                   os.path.dirname(os.path.abspath(python_exe))]
         proc = subprocess.Popen(cmd)
     except Exception as e:
         listener.close()
