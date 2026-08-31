@@ -1530,7 +1530,11 @@ class _ShmQueue:
         """按需扩容（仅在 put 持锁内调用）：新建更大段（换名 `_v{gen}`）→ 代际+1。
 
         只涨不缩（new_obj_size 不大于当前则忽略）；count/ridx/widx 清零——
-        旧数据丢弃（maxlen=1/drop_oldest 语义安全；多槽场景整条队列清空）。
+        旧数据丢弃（maxlen=1/drop_oldest 语义安全）。
+
+        ⚠ 语义警告：扩容会清空队列。单槽（maxlen=1）场景无感知；**多槽通道
+        （如 maxlen=3）扩容瞬间会丢失全部已排队消息**（读方跨代际重 attach 后
+        队列为空）。多槽 + 大对象并存的场景请评估该语义。
         旧段保持原样（其他进程仍持有句柄时也不受影响——读方经 header 预告换名）。
         """
         new_obj_size = int(new_obj_size)
@@ -1701,6 +1705,10 @@ class DataBus:
         bus.close()                       # 进程退出/不再使用时释放
 
     进程模式经 spawn 参数传给子进程（自动按名字 attach，不重复创建）。
+
+    按需扩容（大对象超过 max_obj_size）：put 时自动换名重建更大段并清空队列
+    （只涨不缩，代际预告 + 读方重 attach）。⚠ 多槽通道扩容会丢失全部已排队消息，
+    业务上请使用 maxlen=1（帧最新优先）或为该明细语义负责。
     """
 
     def __init__(self, name="", maxlen=100, mode="auto", overflow="drop_oldest",
