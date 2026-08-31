@@ -82,7 +82,8 @@ class _Controller:
 def main(flow: str = None, main_process: str = "", code: str = "",
          project: str = "") -> None:
     """框架入口：参数优先，缺省从 sys.argv 解析（--flow/--main/--code/--project）。
-    project 空 = 不锁项目（仅公司锁）。""" ...
+    project 空 = 不锁项目（仅公司锁）。"""
+    ...
 
 def build_processes(dir_path: str, main_process_name: str, codeDict: dict = None,
                     startor_cls: type = None, pro_startor_cls: type = None,
@@ -131,6 +132,54 @@ class ProcessStartor:
                  python_exe: str = None) -> None: ...
     def start(self, is_thread=True, **kwargs) -> ProcessExecutor: ...
 
+# ===== HRFrame v1 帧协议（语言无关：48B 小端帧头 + 原始像素，任何语言可消费） =====
+# 字节布局：[0:4]magic "HFRM" [4:8]version=1 [8:12]format [12:16]width
+#   [16:20]height [20:24]row_stride(0=紧凑) [24:32]frame_id(u64) [32:40]ts_ns(u64)
+#   [40:44]bpp(每像素位深: BGR8=24/BGRA8=32) [44:48]reserved [48:]像素数据区
+# 协议单源于此模块（pyd 内置）；utils/hrframe.py 为公开薄封装（re-export）；
+# C++ 参考头 HRVision/include/hrframe.h；节点帧通道见 DataBus.put_frame_raw/
+# get(with_meta=True)、_ChannelIn.get(with_meta=True)。
+
+HFRAME_HEADER: int           # 48
+HFRAME_MAGIC: bytes          # b"HFRM"
+HFRAME_VERSION: int          # 1
+HFRAME_FMT_MONO8: int
+HFRAME_FMT_MONO16: int
+HFRAME_FMT_BAYER_RG8: int
+HFRAME_FMT_BAYER_GB8: int
+HFRAME_FMT_BAYER_GR8: int
+HFRAME_FMT_BAYER_BG8: int
+HFRAME_FMT_BGR8: int
+HFRAME_FMT_RGB8: int
+HFRAME_FMT_BGRA8: int
+HFRAME_FMT_GRAYF32: int
+HFRAME_FMT_RGB_PLANAR8: int
+HFRAME_FMT_BGR_PLANAR8: int
+
+def hrframe_formats() -> dict:
+    """格式表副本：{fmt: (name, dtype_str, channels, bpp)}。"""
+
+def hrframe_make_header(fmt: int, width: int, height: int,
+                        frame_id: int = 0, ts_ns: int = 0,
+                        stride: int = 0) -> bytes:
+    """构造 48B 帧头（小端）。stride=0 → 紧凑（width*bpp//8）。"""
+
+def hrframe_from_array(arr, frame_id: int = 0, ts_ns: int = 0,
+                       fmt: int = None) -> bytes:
+    """ndarray → HRFrame 帧块。按 dtype/shape 自动推断格式（u8 1/3/4ch→
+    Mono8/BGR8/BGRA8，u16→Mono16，f32→GrayF32）；Bayer/planar 须显式 fmt。"""
+
+def hrframe_parse(payload) -> tuple[dict, memoryview]:
+    """解析帧块 → (header, 数据区只读视图)。header 含 format/format_name/
+    width/height/row_stride/frame_id/ts_ns/bpp/dtype/channels。"""
+
+def hrframe_to_array(payload, copy: bool = False):
+    """帧块 → ndarray（默认零拷贝只读视图；copy=True 返回可写副本）。
+    非紧凑 row_stride 以 strides 还原。"""
+
+def hrframe_load(payload, copy: bool = False) -> tuple[dict, object]:
+    """(header, ndarray) 一并返回；copy=False 时数组为只读视图。"""
+
 # ===== 数据总线（thread/process 双模式） =====
 
 class DataBus:
@@ -139,6 +188,8 @@ class DataBus:
     进程模式基于共享内存环形队列（零管道拷贝）；线程模式基于 queue.Queue。
     overflow: "drop_oldest"（默认，覆盖最旧）/ "drop_new" / "block"。
     max_obj_size: 大对象槽单槽字节上限（numpy 帧按实际布局传，默认 8MB）。
+    帧通道：put(ndarray 自动封装 HRFrame)/put_frame_raw(显式帧块，Bayer 等)/
+    get(with_meta=True) 返回 (header, ndarray)——frame_id 对齐/丢帧检测。
     """
     name: str
     maxlen: int
@@ -150,7 +201,11 @@ class DataBus:
                  overflow: str = "drop_oldest", max_msg_size: int = 1048576,
                  max_obj_size: int | None = None) -> None: ...
     def put(self, data) -> bool: ...
-    def get(self, timeout=None): ...
+    def put_frame_raw(self, frame_blob) -> bool:
+        """发送 HRFrame v1 帧块（bytes/bytearray，含 48B 帧头）。
+        显式格式路径：Bayer/planar 等 ndarray 推断不出的语义由帧头标识。"""
+    def get(self, timeout=None, with_meta=False):
+        """接收消息；with_meta=True 时帧消息返回 (header, ndarray)。"""
     def close(self) -> None: ...
 
 # ===== 资源治理 =====
@@ -220,9 +275,11 @@ def load_pipeline_spec(path: str) -> dict: ...
 def validate_pipeline_spec(spec: dict) -> bool: ...
 
 class _ChannelIn:
-    """聚合读通道：从第一个有数据的 in 通道取数据（队列 get）。"""
+    """聚合读通道：从第一个有数据的 in 通道取数据（队列 get）。
+    with_meta=True 透传底层帧通道：帧消息返回 (header, ndarray)（HRFrame v1，
+    带 frame_id——节点按帧号对齐）。"""
     def __init__(self, channels: list) -> None: ...
-    def get(self, timeout: float = None): ...
+    def get(self, timeout: float = None, with_meta: bool = False): ...
 
 class _ChannelOut:
     """聚合写通道：put 写队列（每帧），write 写映射（throttle 降频，内部计数）。"""
