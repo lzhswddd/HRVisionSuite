@@ -866,29 +866,28 @@ class _FrameBuffer:
             self._shm.close()
             self._shm.unlink()
             self._shm = None
-        # 残留段容错：上次进程被强杀可能留下同名段（_cleanup_on_exit 未执行）；
-        # 类似 _ShmQueue——unlink 后重试；极端冲突兜底唯一名
-        for _attempt in range(2):
-            try:
-                self._shm = _shm.SharedMemory(name=self.name, create=True, size=need)
-                break
-            except FileExistsError:
-                try:
-                    old = _shm.SharedMemory(name=self.name)
-                    old.unlink()
-                    old.close()
-                except Exception:
-                    pass
-                time.sleep(0.05)
-        else:
-            self.name = self.name + "_" + uuid.uuid1().hex[:8]
+        # 段已存在 → **原样附加，绝不 unlink 重建**。unlink 重建会把"主进程建的槽段"
+        # 与"子进程写方"分裂成两份：写方进新段、读方挂旧映射——槽 seq 冻结/
+        # 画面卡死不刷新（实测：camera-1 原图冻结、写方 seq=1 而读方仍 None）。
+        # 残留段由启动时 cleanup_all_segments() 统一清（登记名单 + POSIX /dev/shm 扫描）。
+        try:
             self._shm = _shm.SharedMemory(name=self.name, create=True, size=need)
-        self._created = True
-        _atexit.register(self._cleanup_on_exit)
+            self._created = True
+            _register_segment(self.name)
+            _atexit.register(self._cleanup_on_exit)
+        except FileExistsError:
+            self._shm = _shm.SharedMemory(name=self.name)      # 附加（读方/写方）
+            self._created = False
+            if self._shm.size < need:
+                self._shm.close()
+                raise RuntimeError(
+                    "frame buffer %s 段尺寸不足（%d < %d）：布局不一致的旧段请先 "
+                    "cleanup_all_segments() 清理后再启动" % (self.name, need, self._shm.size))
 
     def _cleanup_on_exit(self):
         """进程退出时清理（POSIX 需要；Windows 无害——unlink 幂等）。"""
         if self._shm is not None and self._created:
+            _unregister_segment(self.name)
             try:
                 self._shm.unlink()
             except Exception:
@@ -1314,17 +1313,28 @@ def _unregister_segment(name):
 
 
 def cleanup_all_segments():
-    """按登记名单清理所有残留共享内存段（含兜底唯一名段）。
+    """按登记名单清理所有残留共享内存段（含兜底唯一名段）；POSIX 另按前缀扫 /dev/shm。
 
     强杀进程残留的段名无法枚举（Windows 无 API），但创建时已登记——
-    按名单 unlink；被其他进程持有（正在使用）的段 unlink 失败自动跳过。
+    按名单 unlink；被其他进程持有（正在使用）的段 unlink 失败自动跳过（映射仍有效）。
+    POSIX（Linux/macOS）：/dev/shm 可枚举，按 shm_HRVisionProc_/shm_HRVisionBus_ 前缀
+    追加清理（覆盖未登记的历史残留）——unlink 只删名字，持效映射不受影响。
     建议在应用启动时调用一次（_Controller.run 已默认调用）。
     """
+    names = []
     try:
         with open(_SEGMENTS_FILE, encoding="utf-8") as f:
             names = [l.strip() for l in f if l.strip()]
     except Exception:
-        names = []
+        pass
+    if sys.platform.startswith("linux"):
+        # POSIX 枚举兜底：登记文件之外的旧版本残留（shm_ 是 multiprocessing.shared_memory 的文件前缀）
+        try:
+            for fn in os.listdir("/dev/shm"):
+                if fn.startswith(("shm_HRVisionProc_", "shm_HRVisionBus_")):
+                    names.append(fn[len("shm_"):])
+        except Exception:
+            pass
     for name in names:
         try:
             seg = _shm.SharedMemory(name=name)
