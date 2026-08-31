@@ -2403,15 +2403,18 @@ def validate_pipeline_spec(spec):
 # ---------- 聚合通道：节点输入/输出的统一入口（channel_in / channel_out） ----------
 
 class _ChannelIn:
-    """聚合读通道：从第一个有数据的 in 通道取数据（队列 get）。"""
+    """聚合读通道：从第一个有数据的 in 通道取数据（队列 get）。
+
+    with_meta=True 透传底层帧通道：帧消息返回 (header, ndarray)（HRFrame v1，
+    带 frame_id/ts_ns——节点按帧号对齐/丢帧检测）。同义透传给 DataBus.get。"""
 
     def __init__(self, channels):
         self._chs = list(channels)
 
-    def get(self, timeout=None):
+    def get(self, timeout=None, with_meta=False):
         for ch in self._chs:
             if hasattr(ch, "get"):
-                return ch.get(timeout=timeout)
+                return ch.get(timeout=timeout, with_meta=with_meta)
         return None
 
 
