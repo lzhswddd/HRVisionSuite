@@ -54,6 +54,10 @@ def bootstrap_main(argv=None) -> int:
         pkl_path = argv[argv.index("--hrflow-bootstrap") + 1]
     else:
         pkl_path = argv[1]
+    # -c 引导形态：argv[2] 为 hrf_dir（打包 exe _internal 父目录）——
+    # 在 import HRVision 之前注入 sys.path（外部解释器可复用包内 HRVision）
+    if len(argv) > 2 and argv[2] and argv[2] not in sys.path:
+        sys.path.insert(0, argv[2])
     with open(pkl_path, "rb") as f:
         p = pickle.load(f)
     d = p.get("hrf_dir")
@@ -249,7 +253,7 @@ def start_external_process(python_exe, getProcess, dir_path, main_process_name,
         # 注意：python.exe 也以 .exe 结尾 —— 探测确认是解释器才走 -c 协议
         if (not python_exe.lower().endswith(".exe")
                 or _is_python_interpreter(python_exe)):
-            cmd = [python_exe, "-c", _EXT_BOOTSTRAP, tmp]
+            cmd = [python_exe, "-c", _EXT_BOOTSTRAP, tmp, params["hrf_dir"]]  # argv[2]=hrf_dir
         else:
             cmd = [python_exe, "--hrflow-bootstrap", tmp]
         proc = subprocess.Popen(cmd)
