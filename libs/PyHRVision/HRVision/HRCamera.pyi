@@ -102,3 +102,14 @@ __copyright__: str = 'Copyright (c) 2023 HRVision'
 __description__: str = 'HRVision的相机接口模块'
 __license__: str = 'MIT License'
 __version__: str = '0.1.0'
+
+class DeviceInfo:
+    key: str
+    serial: str
+    user_defined_name: str
+    model: str
+    vendor: str
+    ip: str
+
+def enumerate_cameras(cameraType: str) -> list[DeviceInfo]:
+    """扫描相机类型下的可用设备（厂商 DLL EnumerateDevices；不支持返回 []）。"""

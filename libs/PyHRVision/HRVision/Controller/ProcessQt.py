@@ -30,9 +30,10 @@ def ndarray_to_qimage(array: np.ndarray) -> QImage:
         # 彩色图像 (RGB 或 RGBA)
         height, width, channels = array.shape
         if channels == 3:
-            # RGB 图像
-            bytes_per_line = 3 * width
-            qimage = QImage(array.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            # 框架约定 3 通道帧 = RGB（OpenCV 系相机已在源侧 BGR2RGB；
+            # 海康 RGB8_Packed 等 SDK 输出亦为 RGB）——直接 RGB888 包装
+            qimage = QImage(array.data, width, height, 3 * width,
+                            QImage.Format_RGB888)
         elif channels == 4:
             # RGBA 图像
             bytes_per_line = 4 * width

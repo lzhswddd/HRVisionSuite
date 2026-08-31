@@ -18,10 +18,25 @@ class VideoCamera(CameraBase):
         初始化相机
         """
         super().__init__(cameraType, **kwargs)
-        self.file_paths = kwargs.get("file_paths", [])
+        self.file_paths = self._norm_sources(kwargs.get("file_paths", []))
         self._capture = None
         self.index = -1
         self.reord_index = -1
+
+    def _norm_sources(self, sources) -> list:
+        """数值字符串（UI 文本框/JSON 消息里的 USB 索引，如 "0"）归一化为 int。
+
+        协议消息是 json 可序列化 dict，字符串数字经 _as_list 原样进入 file_paths；
+        而 cv2.VideoCapture 需要 int 索引——字符串 "0" 会被当作文件名打开失败。
+        真实存在的文件、网络流地址原样保留。
+        """
+        out = []
+        for s in (sources or []):
+            if isinstance(s, str) and s.isdigit() and not os.path.isfile(s):
+                out.append(int(s))
+            else:
+                out.append(s)
+        return out
 
     def _is_network_stream(self, path) -> bool:
         return isinstance(path, str) and path.lower().startswith(("rtsp://", "http://", "https://"))
@@ -70,9 +85,15 @@ class VideoCamera(CameraBase):
                     return False, [], "No more video sources available."
 
         if self.exposure_time > 0:
-            frame = frame * (self.exposure_time / 1000.0)
+            # cast 回原 dtype：乘法经 float 计算会把 uint8 升级为 float64
+            # （8 倍内存，超共享内存队列槽上限）
+            frame = (frame * (self.exposure_time / 1000.0)).astype(frame.dtype, copy=False)
         if self.gain > 0:
-            frame = frame + self.gain
+            frame = (frame + self.gain).astype(frame.dtype, copy=False)
+        if frame.ndim == 3 and frame.shape[2] == 3:
+            # OpenCV 读图特例：cv2 默认 BGR——框架约定 3 通道帧 = RGB
+            #（显示端 HRVision.ndarray_to_qimage 直接 RGB888 包装，不 swap）
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         user_callback = self._param.get("user_callback", None)
         if user_callback and callable(user_callback):
@@ -136,7 +157,7 @@ class VideoCamera(CameraBase):
         if "camera_type" in config:
             self.camera_type = config["camera_type"]
         if "file_paths" in config:
-            self.file_paths = config["file_paths"]
+            self.file_paths = self._norm_sources(config["file_paths"])
         if "exposure_time" in config:
             self.exposure_time = config["exposure_time"]
         if "gain" in config:

@@ -63,7 +63,7 @@ def bootstrap_main(argv=None) -> int:
     conn = Client(p["conn_addr"])
     from HRVision.HRFlowController import _process_main
     _process_main(p["flow_id"], p["dir_path"], p["main_process_name"],
-                  conn, p["proc_config"], **p["kwargs"])
+                  conn, p["proc_config"], codeDict=p.get("codeDict"), **p["kwargs"])
     return 0
 
 
@@ -204,7 +204,7 @@ def _ensure_external_pickle_support() -> None:
 
 def start_external_process(python_exe, getProcess, dir_path, main_process_name,
                            signals=None, kwargs=None, priority=None,
-                           cpu_affinity=None):
+                           cpu_affinity=None, codeDict=None):
     """用指定解释器拉起流程子进程；返回 ProcessExecutor（与 spawn 路径 API 一致）。
 
     参数（由 ProcessStartor._start_external 传入）：
@@ -233,6 +233,7 @@ def start_external_process(python_exe, getProcess, dir_path, main_process_name,
     params = {"flow_id": flow_id or "", "dir_path": dir_path,
               "main_process_name": main_process_name,
               "proc_config": {"signals": signals or []},
+              "codeDict": codeDict,
               "conn_addr": listener.address, "kwargs": kwargs or {},
               # HRVision 包所在目录的父目录（sys.path 需含父目录才能 import HRVision）；
               # 外部解释器可能不在 site-packages 安装，显式注入

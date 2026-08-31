@@ -49,9 +49,13 @@ class LocalCamera(CameraBase):
                 return False, [], f"Failed to decode image. {self.image_paths[self.index]}"
 
             if self.exposure_time > 0:
-                image = image * (self.exposure_time / 1000.0)
+                # cast 回原 dtype（防止 uint8 被 float 运算升级 float64）
+                image = (image * (self.exposure_time / 1000.0)).astype(image.dtype, copy=False)
             if self.gain > 0:
-                image = image + self.gain
+                image = (image + self.gain).astype(image.dtype, copy=False)
+            if image.ndim == 3 and image.shape[2] == 3:
+                # OpenCV 读图特例：cv2.imdecode 默认 BGR——框架约定 3 通道帧 = RGB
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
             user_callback = self._param.get("user_callback", None)
             if user_callback and callable(user_callback):
