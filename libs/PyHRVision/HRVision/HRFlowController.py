@@ -14,6 +14,7 @@ import uuid
 import types
 import time
 import tempfile
+import struct
 
 import atexit as _atexit
 import multiprocessing
@@ -1377,6 +1378,182 @@ def _resolve_shm_name(name):
     return max(candidates)
 
 
+# ============================ HRFrame v1 帧协议 ============================
+# 语言无关的帧二进制协议：共享内存对象槽 / 任意字节流均可承载——任何语言
+# 只要读 48B 头 + 原始像素字节即可消费，不依赖 numpy/pickle。
+# C/C++ 参考实现见 HRVision/include/hrframe.h（header-only，无 OpenCV 依赖）。
+# C#/Java 参照协议表自行解码（字段全为小端固定宽度）。
+#
+# 字节布局（小端，48B 头）：
+#   [0:4]  magic "HFRM"    [4:8]  version=1
+#   [8:12] format          [12:16] width    [16:20] height
+#   [20:24] row_stride（0=紧凑 width*bpp//8）
+#   [24:32] frame_id(u64)  [32:40] ts_ns(u64)
+#   [40:44] bpp（每像素位深：Mono8=8 BGR8=24 BGRA8=32，跨语言免查表）
+#   [44:48] reserved=0
+#   [48:]   像素数据区，长度 = row_stride*height（紧凑时 width*height*bpp//8）
+#
+# 接入点：_ShmQueue 对象槽/DataBus.process 帧通道（put ndarray→自动封装；
+# put_frame_raw→显式格式（Bayer/planar 等 ndarray 推断不出的语义）；
+# get(with_meta=True) 返回 (header, ndarray)）。协议单源且随 pyd 内置，
+# utils/hrframe.py 仅为公开薄封装（re-export，不加业务逻辑）。
+HFRAME_MAGIC = b"HFRM"
+HFRAME_VERSION = 1
+HFRAME_HEADER = 48
+
+HFRAME_FMT_MONO8 = 0        # uint8 1ch（8 位灰度）
+HFRAME_FMT_MONO16 = 1       # uint16 1ch（Mono10/12/14 按 16 位存储）
+HFRAME_FMT_BAYER_RG8 = 2    # 原始 Bayer（uint8 单通道）
+HFRAME_FMT_BAYER_GB8 = 3
+HFRAME_FMT_BAYER_GR8 = 4
+HFRAME_FMT_BAYER_BG8 = 5
+HFRAME_FMT_BGR8 = 6         # OpenCV 惯例 uint8 interleaved BGR
+HFRAME_FMT_RGB8 = 7         # uint8 interleaved RGB
+HFRAME_FMT_BGRA8 = 8        # uint8 interleaved BGRA
+HFRAME_FMT_GRAYF32 = 9      # float32 单通道
+HFRAME_FMT_RGB_PLANAR8 = 10 # uint8 planar RRR GGG BBB（相机/算子转换管道用）
+HFRAME_FMT_BGR_PLANAR8 = 11 # uint8 planar BBB GGG RRR
+
+_HFRAME_FMT_TABLE = {
+    HFRAME_FMT_MONO8:        ("Mono8", "uint8", 1, 8),
+    HFRAME_FMT_MONO16:       ("Mono16", "uint16", 1, 16),
+    HFRAME_FMT_BAYER_RG8:    ("BayerRG8", "uint8", 1, 8),
+    HFRAME_FMT_BAYER_GB8:    ("BayerGB8", "uint8", 1, 8),
+    HFRAME_FMT_BAYER_GR8:    ("BayerGR8", "uint8", 1, 8),
+    HFRAME_FMT_BAYER_BG8:    ("BayerBG8", "uint8", 1, 8),
+    HFRAME_FMT_BGR8:         ("BGR8", "uint8", 3, 24),
+    HFRAME_FMT_RGB8:         ("RGB8", "uint8", 3, 24),
+    HFRAME_FMT_BGRA8:        ("BGRA8", "uint8", 4, 32),
+    HFRAME_FMT_GRAYF32:      ("GrayF32", "float32", 1, 32),
+    HFRAME_FMT_RGB_PLANAR8:  ("RGB-planar8", "uint8", 3, 24),
+    HFRAME_FMT_BGR_PLANAR8:  ("BGR-planar8", "uint8", 3, 24),
+}
+
+
+def hrframe_formats():
+    """格式表副本：{fmt: (name, dtype_str, channels, bpp)}。"""
+    return dict(_HFRAME_FMT_TABLE)
+
+
+def hrframe_make_header(fmt, width, height, frame_id=0, ts_ns=0, stride=0):
+    """构造 48B 帧头（bytes）。stride=0 → 紧凑（width*bpp//8）。"""
+    info = _HFRAME_FMT_TABLE.get(fmt)
+    if info is None:
+        raise ValueError("unknown hrframe format: %r" % (fmt,))
+    if not stride:
+        stride = int(width) * info[3] // 8
+    return struct.pack("<4sIIIIIQQII", HFRAME_MAGIC, HFRAME_VERSION, int(fmt),
+                       int(width), int(height), int(stride),
+                       int(frame_id) & 0xFFFFFFFFFFFFFFFF,
+                       int(ts_ns) & 0xFFFFFFFFFFFFFFFF, info[3], 0)
+
+
+def _hrframe_infer_format(arr):
+    dt = arr.dtype
+    if dt == np.uint8:
+        if arr.ndim == 2:
+            return HFRAME_FMT_MONO8
+        if arr.ndim == 3:
+            if arr.shape[2] == 1:
+                return HFRAME_FMT_MONO8
+            if arr.shape[2] == 3:
+                return HFRAME_FMT_BGR8
+            if arr.shape[2] == 4:
+                return HFRAME_FMT_BGRA8
+    elif dt == np.uint16 and arr.ndim == 2:
+        return HFRAME_FMT_MONO16
+    elif dt == np.float32 and arr.ndim == 2:
+        return HFRAME_FMT_GRAYF32
+    raise ValueError("cannot infer hrframe format for dtype=%s shape=%s"
+                     " (pass fmt= explicitly)" % (dt, arr.shape))
+
+
+def hrframe_from_array(arr, frame_id=0, ts_ns=0, fmt=None):
+    """ndarray → HRFrame 帧块（bytes）。按 dtype/shape 自动推断格式，fmt 可覆盖
+    （Bayer 等原始格式须显式指定；默认 3ch-uint8 视为 BGR8）。"""
+    a = np.ascontiguousarray(arr)
+    if fmt is None:
+        fmt = _hrframe_infer_format(a)
+    info = _HFRAME_FMT_TABLE.get(fmt)
+    if info is None:
+        raise ValueError("unknown hrframe format: %r" % (fmt,))
+    if a.ndim not in (2, 3):
+        raise ValueError("hrframe frame must be 2D/3D, got %s" % (a.shape,))
+    if str(a.dtype) != info[1]:
+        raise ValueError("hrframe format %s needs dtype %s, got %s"
+                         % (info[0], info[1], a.dtype))
+    ch = info[2]
+    if a.ndim == 3 and a.shape[2] != ch:
+        raise ValueError("hrframe format %s needs %d channels, got shape %s"
+                         % (info[0], ch, a.shape))
+    if int(info[3]) // 8 != a.itemsize * ch:
+        raise ValueError("hrframe format %s bpp=%d mismatch dtype/itemsize=%d*%d"
+                         % (info[0], info[3], a.itemsize, ch))
+    hdr = hrframe_make_header(fmt, a.shape[1], a.shape[0], frame_id, ts_ns, 0)
+    return hdr + a.tobytes()
+
+
+def hrframe_parse(payload):
+    """解析 HRFrame 帧块 → (header dict, memoryview 数据区)。
+    header：format / format_name / width / height / row_stride / frame_id /
+    ts_ns / bpp / dtype / channels。数据区为只读切片（零拷贝）。"""
+    if isinstance(payload, memoryview):
+        buf = payload
+    elif isinstance(payload, (bytes, bytearray)):
+        buf = memoryview(payload)
+    else:
+        raise TypeError("hrframe payload must be bytes/bytearray/memoryview")
+    if len(buf) < HFRAME_HEADER:
+        raise ValueError("hrframe too short: %d bytes" % len(buf))
+    magic, version, fmt, width, height, stride, fid, ts, bpp, _resv = \
+        struct.unpack("<4sIIIIIQQII", bytes(buf[:48]))
+    if magic != HFRAME_MAGIC:
+        raise ValueError("not an hrframe (magic=%r)" % magic)
+    if version != HFRAME_VERSION:
+        raise ValueError("hrframe version %d != %d" % (version, HFRAME_VERSION))
+    info = _HFRAME_FMT_TABLE.get(fmt)
+    if info is None:
+        raise ValueError("unknown hrframe format: %d" % fmt)
+    row = int(stride) if stride else int(width) * info[3] // 8
+    need = row * int(height)
+    if len(buf) < HFRAME_HEADER + need:
+        raise ValueError("hrframe truncated: need %d, got %d"
+                         % (HFRAME_HEADER + need, len(buf)))
+    hdr = {"format": int(fmt), "format_name": info[0], "width": int(width),
+           "height": int(height), "row_stride": row, "frame_id": int(fid),
+           "ts_ns": int(ts), "bpp": int(bpp), "dtype": np.dtype(info[1]),
+           "channels": info[2]}
+    return hdr, buf[HFRAME_HEADER:HFRAME_HEADER + need]
+
+
+def hrframe_to_array(payload, copy=False):
+    """HRFrame 帧块 → ndarray（默认零拷贝只读视图；copy=True 返回可写副本）。
+    非紧凑 row_stride 以 strides 构造，不整段拷贝。"""
+    hdr, data = hrframe_parse(payload)
+    ch = hdr["channels"]
+    itemsize = hdr["dtype"].itemsize
+    if ch == 1:
+        shape, strides = (hdr["height"], hdr["width"]), (hdr["row_stride"], itemsize)
+    else:
+        shape = (hdr["height"], hdr["width"], ch)
+        strides = (hdr["row_stride"], itemsize * ch, itemsize)
+    arr = np.ndarray(shape, dtype=hdr["dtype"], buffer=data, strides=strides)
+    if copy:
+        arr = arr.copy()
+    return arr
+
+
+def hrframe_load(payload, copy=False):
+    """(header dict, ndarray) 一并返回；copy=False 时数组为只读视图。"""
+    hdr, _ = hrframe_parse(payload)
+    return hdr, hrframe_to_array(payload, copy=copy)
+
+
+def _is_hrframe_blob(data):
+    return (isinstance(data, (bytes, bytearray, memoryview))
+            and len(data) >= HFRAME_HEADER and bytes(data[:4]) == HFRAME_MAGIC)
+
+
 class _ShmQueue:
     """共享内存环形消息队列（进程间，零管道拷贝）。
 
@@ -1387,10 +1564,13 @@ class _ShmQueue:
         [消息区后] 对象槽 ×maxlen：大对象（numpy 帧）原始字节区（同槽格式）
 
     消息语义（put/get）：
-        - 小对象（非 numpy）：消息槽直接存 pickle 字节（flag=0）
-        - 大对象（numpy 帧）：**原始字节写入对象槽**（免序列化），消息槽只放
-          描述字典 {"__obj__": uid, "shape": ..., "dtype": ...}（flag=2，几百字节）
+        - 小对象（非数组/帧）：消息槽直接存 pickle 字节（flag=0）
+        - 大对象（ndarray 或 HRFrame v1 帧块）：**原始字节写入对象槽**（免序列化），
+          消息槽只放描述 {"__obj__": uid}（flag=2，几十字节）
           ——大数据不走消息通道，按 uid（槽索引）从对象区取，传输量大幅减少。
+          对象槽 payload 以 **HFRAME 帧头开头（语言无关）**：C++/C# 可不经
+          pickle 直接消费（见源码上部 HRFrame v1 协议段 / include/hrframe.h）。
+          兼容旧版无帧头 payload（描述含 shape/dtype 的裸字节）时按 numpy 还原。
     消息槽 i ↔ 对象槽 i 1:1 对齐：drop_oldest 覆盖时两区同步（ridx/widx 共用）。
     互斥由外部 mp.Lock 提供（SemLock 内核对象，经 spawn 参数继承）。
     """
@@ -1604,14 +1784,19 @@ class _ShmQueue:
     def put(self, data, lock, overflow):
         """写入一条消息。
 
-        numpy 大对象：原始字节进对象槽，消息槽只放描述（uid=槽索引，几百字节）；
-        小对象：pickle 直接进消息槽。drop_new 满返回 False；drop_oldest 覆盖最旧。
+        ndarray 自动封装为 HRFrame v1 帧块进对象槽（语言无关）；已封装帧块
+        （bytes/bytearray/memoryview，48B 帧头开头）同样进对象槽（Bayer 等
+        显式格式语义由帧头保留，不经 ndarray 推断）。其余小对象 pickle 直接
+        进消息槽。drop_new 满返回 False；drop_oldest 覆盖最旧。
         """
         if isinstance(data, np.ndarray):
-            # 大对象路径：对象槽存原始字节，消息槽存 {"__obj__": uid, shape, dtype}
-            arr = np.ascontiguousarray(data)
-            raw = arr.tobytes()
-            desc = pickle.dumps({"__obj__": 0, "shape": arr.shape, "dtype": str(arr.dtype)})
+            # 大对象路径：HRFrame 帧块进对象槽，消息槽只放 {"__obj__": uid}
+            raw = hrframe_from_array(data)
+            desc = pickle.dumps({"__obj__": 0})
+        elif _is_hrframe_blob(data):
+            # 已按 HRFrame v1 封装的帧块（显式格式 / 其他语言侧封装）
+            raw = bytes(data)
+            desc = pickle.dumps({"__obj__": 0})
         else:
             flag, meta, payload = self._serialize(data)
             total = len(meta) + len(payload)
@@ -1650,8 +1835,9 @@ class _ShmQueue:
                 # block：轮询等待空间
             time.sleep(0.001)
 
-    def get(self, lock, timeout=None):
-        """读取一条消息。大对象按消息槽描述从对象槽取（uid=槽索引）。超时/空返回 None。"""
+    def get(self, lock, timeout=None, with_meta=False):
+        """读取一条消息。大对象按消息槽描述从对象槽取（uid=槽索引）。
+        超时/空返回 None；with_meta=True 时帧消息返回 (header, ndarray)。"""
         deadline = None if timeout is None else time.time() + timeout
         while True:
             with lock:
@@ -1662,12 +1848,22 @@ class _ShmQueue:
                     msg_off = self._slot_off(ridx)
                     flag, meta, payload = self._read_slot(msg_off)
                     if flag == self._FLAG_OBJ_DESC:
-                        # 大对象：按描述（uid=ridx 槽对齐）从对象槽取原始字节
+                        # 大对象：按槽对齐从对象槽取；HRFrame 帧头优先（语言无关）
                         desc = pickle.loads(payload)
                         oflag, ometa, opayload = self._read_slot(self._obj_slot_off(ridx))
-                        shape = desc.get("shape")
-                        dtype = np.dtype(desc.get("dtype"))
-                        result = np.frombuffer(opayload, dtype=dtype).reshape(shape).copy()
+                        if _is_hrframe_blob(opayload):
+                            if with_meta:
+                                result = hrframe_load(opayload)
+                            else:
+                                result = hrframe_to_array(opayload)
+                        elif desc.get("shape") is not None:
+                            # 兼容旧版无帧头裸字节（描述含 shape/dtype）
+                            shape = desc.get("shape")
+                            dtype = np.dtype(desc.get("dtype"))
+                            result = np.frombuffer(opayload, dtype=dtype).reshape(shape).copy()
+                        else:
+                            # opaque 大对象（其他语言写入的非帧数据）
+                            result = bytes(opayload)
                     else:
                         result = self._deserialize(flag, meta, payload)
                     np.frombuffer(self._buf[16:20], np.uint32)[0] = (ridx + 1) % self.maxlen
@@ -1789,14 +1985,32 @@ class DataBus:
             return True
         return self._q.put(data, self._lock, self.overflow)
 
-    def get(self, timeout=None):
-        """接收消息。超时/空返回 None。"""
+    def put_frame_raw(self, frame_blob) -> bool:
+        """发送 HRFrame v1 帧块（bytes/bytearray，含 48B 帧头，语言无关）。
+
+        显式格式路径：Bayer/planar 等 ndarray 推断不出的语义由帧头 format 字段
+        标识（C++/C# 可按 include/hrframe.h 直接构造/消费）。线程模式等价入队。
+        """
+        if not _is_hrframe_blob(frame_blob):
+            raise ValueError("frame_blob 必须是 HRFrame v1 帧块（48 字节帧头 + 数据）")
+        if self.mode == "thread":
+            return self.put(frame_blob)
+        return self._q.put(frame_blob, self._lock, self.overflow)
+
+    def get(self, timeout=None, with_meta=False):
+        """接收消息。超时/空返回 None；with_meta=True 时帧消息返回
+        (header, ndarray)——header 含 format/width/height/row_stride/frame_id/
+        ts_ns 等，用于帧号对齐与管理。ndarray 为只读视图（零拷贝），
+        需要写入请 .copy()。"""
         if self.mode == "thread":
             try:
-                return self._q.get(timeout=timeout)
+                data = self._q.get(timeout=timeout)
             except Exception:
                 return None
-        return self._q.get(self._lock, timeout)
+            if with_meta and _is_hrframe_blob(data):
+                return hrframe_load(data)
+            return data
+        return self._q.get(self._lock, timeout, with_meta=with_meta)
 
     def qsize(self) -> int:
         try:
