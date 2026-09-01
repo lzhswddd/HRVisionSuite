@@ -130,6 +130,10 @@ class ExternalWorker:
                 self.close()
                 raise RuntimeError("外部工具启动失败（%s，日志: %s）"
                                    % (self.launch[0], self.log_path or "(继承)"))
+            # READY 后 stdout 必须继续被读（排水线程）——否则 worker 此后 print
+            # 写已停读的管道：实测 OSError [Errno 22] 直接把 worker 杀掉
+            #（intermittent：管道缓冲恰未填满时正常，正是「时好时坏」的根源）
+            self._start_stdout_drain()
             self._sock = socket.create_connection(("127.0.0.1", port), timeout=30)
             self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
@@ -190,3 +194,44 @@ class ExternalWorker:
                 if len(parts) >= 2:
                     return int(parts[1])
         return None
+
+    def _start_stdout_drain(self) -> None:
+        """READY 握手后保持 stdout 排水：管道始终被读，worker 的 print 不再
+        阻塞/触发 OSError 22（实证：握手后不读 stdout → worker 打印即被杀）。
+
+        行内容：
+            - 配置了 log_path → 追加写入同一日志文件（"|out| " 前缀，与 stderr
+              分流，排障时仍能看到 worker 的输出）
+            - 未配置 → 直接丢弃（只保证管道通畅）
+        进程退出/close() 后 readline 返回 b"" → 线程自然结束（daemon，不阻塞退出）。
+        """
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return
+        logf = None
+        if self.log_path:
+            try:
+                logf = open(self.log_path, "a", encoding="utf-8", errors="replace")
+            except OSError:
+                logf = None
+
+        def _drain() -> None:
+            try:
+                for line in iter(lambda: proc.stdout.readline(), b""):
+                    if logf is not None:
+                        try:
+                            logf.write("|out| " + line.decode("utf-8", "replace"))
+                            logf.flush()
+                        except OSError:
+                            pass
+            except Exception:
+                pass
+            finally:
+                if logf is not None:
+                    try:
+                        logf.close()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_drain, daemon=True,
+                         name="ExternalWorker-stdout").start()
