@@ -34,36 +34,54 @@ import shutil
 import sys
 
 
-def set_authorization(code: str = "", dev_code: str = "") -> bool:
-    """注册 HslCommunication（需注册的 dll 版本才有 Authorization 成员）。
+def set_authorization_code(code: str) -> bool:
+    """HslCommunication 授权注册（static SetAuthorizationCode，反射式调用）。
 
-    code/device 敏感 → 仅供运行时显式传入（env/配置），不进源码/仓库。
-    免费/开源 dll 无该方法 → 返回 False 并提示。
+    实测：pythonnet 常规属性/import 路径无法解析该类型（Assembly 类型装载碎），
+    反射 Invoke 100% 可用（与 PLCDevice.cpp 的 C++/CLI 调用同语义）。
+    **授权码敏感**：仅经环境变量 HRVISION_HSL_AUTH 或运行时显式传入，
+    禁止写入源码/日志/仓库。
     """
     try:
-        import HslCommunication as _H
-    except Exception:
+        ClrPlc._ensure()     # dll 先装载（否则 AppDomain 里找不到装配 → False）
+        import clr           # pythonnet 先装载（System 由 pythonnet 提供）
+        import System
+        _arg = System.String(str(code))    # 显式 System.String（实测自动转换判 False！
+        for _a in list(System.AppDomain.CurrentDomain.GetAssemblies()):   # 差异点）
+            if str(_a.GetName().Name) == "HslCommunication":
+                _t = _a.GetType("HslCommunication.Authorization")
+                if _t is not None:
+                    _r = _t.GetMethod("SetAuthorizationCode").Invoke(None, [_arg])
+                    return True if _r is None else bool(_r)
         return False
-    _Auth = getattr(_H, "Authorization", None)
-    if _Auth is None:
-        print("[plc] 当前 HslCommunication.dll 无授权 API（免注册版），跳过授权",
-              flush=True)
-        return False
-    try:
-        _Auth.SetAuthorization(code, dev_code)
-        return True
     except Exception as e:
-        print("[plc] 授权失败:", e, flush=True)
+        print("[plc] 授权注册失败:", e, flush=True)
         return False
+
+
+def set_authorization(code: str = "", dev_code: str = "") -> bool:
+    """兼容入口：注册码为主要参数（dev_code 在 SetAuthorizationCode API 中无需）。"""
+    return set_authorization_code(code or dev_code)
+
+
+_AUTH_TIP_SHOWN = [False]
 
 
 def _autoload_auth() -> None:
-    """构造前自动注册：环境变量 HRVISION_HSL_AUTH="公司码:设备码"。"""
+    """构造前自动注册：环境变量 HRVISION_HSL_AUTH（=注册码；兼容 "code:devcode"）。
+
+    授权码敏感：只认环境/显式传入——不读文件、不进 git。未配置时提示一次
+    （部分 dll 功能在未授权态可能受限——参照 PLCDevice.cpp 的 RegisterDevice 语义）。
+    """
     v = os.environ.get("HRVISION_HSL_AUTH", "").strip()
     if not v:
+        if not _AUTH_TIP_SHOWN[0]:
+            _AUTH_TIP_SHOWN[0] = True
+            print("[plc] 提示: 未配置 Hsl 授权码（环境变量 HRVISION_HSL_AUTH），"
+                  "部分功能可能受限", flush=True)
         return
-    code, _, dev = v.partition(":")
-    set_authorization(code, dev)
+    code, _, _dev = v.partition(":")
+    set_authorization_code(code)
 
 
 def hrvision_bin_dir() -> str:
