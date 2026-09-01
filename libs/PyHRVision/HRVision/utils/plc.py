@@ -1,59 +1,90 @@
 # -*- coding: utf-8 -*-
-"""PLC 统一接口（框架通用组件）：HslCommunication(C# 托管) 直连 + 回退双后端。
+"""PLC 统一接口（框架通用组件）：pythonnet + HslCommunication **直连 C#**（仅此一条路）。
 
-对统一接口（地址型，业务位名映射在调用侧/项目层）：
-    Plc("Modbus", host, port) → 后端探测：pythonnet+CLR(HslCommunication) 优先，
-    无 pythonnet → 回退 C++/CLI pyd(PLCInterface,惰性加载)；两者皆无 → 构造抛错。
+已实测的库形态（本 DLL，机型可见）：
+    - 厂商类平铺 HslCommunication 根命名空间：SiemensS7Net / SiemensFetchWriteNet /
+      MelsecMcNet / MelsecMcAsciiNet / MelsecA1ENet / OmronFinsNet / AllenBradleyNet /
+      ModbusTcpNet / ModbusRtuOverTcp（及 KUKA/EFORT 等通讯类）
+    - 全部继承 NetworkDeviceBase → **统一 API**：ConnectServer/ConnectClose +
+      ReadBool/ReadInt16/ReadUInt16/ReadString + WriteBool/WriteInt16/WriteString
+      （地址串透传，各厂自己的地址语法：S7 "DB1.DBX0.0"/"DB1.DBW2"、
+      Melsec "M100"/"D100"、Fins "M10"/"D100"、AB "B3[0].0"/"FLOAT[0]"、Modbus "0"）
 
-常用操作:
-    connect()/is_connected()/close()
-    read_coil(addr)/write_coil(addr, on)      # FC01/FC05, 字符串或整型地址("0")
-    read_register(addr)/write_register(addr, val)
-    兼容别名 read_bit/write_bit = coil 语义
+统一接口（同一调用形态，不抽象各厂地址语义——那是各厂协议精髓，直接透传）：
+    conn = Plc("siemens_s7",  "192.168.0.10", 102)     # 或 modbus/melsec/omron_fins/…
+    conn.connect() / is_connected() / close()
+    conn.read_bool("DB1.DBX0.0") / write_bool(..., on)
+    conn.read_int16("DB1.DBW2")  / write_int16(..., v)
+    conn.read_string(addr)       / write_string(addr, s)
+    # Modbus 协议额外: read_coil/write_coil/read_register/write_register
 
-托管库落位（关键坑,已实测）:HslCommunication.dll 由 pythonnet 托管解析,
-解析基准 = 进程基目录(sys.prefix)——ensure_managed_dll() 自动从
-HRVision/bin(与相机 DLL 同库惯例)补放到基准,无环境根依赖(直连路线)。
+授权（set_authorization）：当前随包 DLL 无 Authorization 成员（免注册版，实测）；
+    若替换为正版需要授权的 dll，组件自动探测 HslCommunication.Authorization 并调
+    SetAuthorization(code, devcode)；也可在构造前用环境变量 HRVISION_HSL_AUTH=
+    "公司码:设备码" 自动注册（敏感信息只走环境/配置，**不进源码与 git**）。
 
-中链事实(pythonnet):纯 C# 库 add_reference 后无 pyd/C++/CLI、无环境根 DLL 依赖;
-本项目专案的 IO 位名映射/镜像路由/mock 语义留在项目 services/plc.py。
+托管库落位（关键坑）：HslCommunication.dll 由 pythonnet 托管解析，解析基准 =
+进程基目录（sys.prefix）——ensure_managed_dll() 自动从 HRVision/bin 补放。
 
-注意:Python 3.9 兼容(字符串注解);cp39 环境无 pythonnet 时回退接口仍可用。
+注意：Python 3.9 兼容（字符串注解）。module 级不 import clr（延迟——无 pythonnet
+环境构造时给明确报错）。
 """
 import os
 import shutil
 import sys
 
-_LEGACY_DIRS = (r"D:/Python/cModule/PLCInterface/build/bin/Release",)
 
-try:
-    import HRVision as _pkg
-    _PKG_DIR = os.path.dirname(os.path.abspath(_pkg.__file__))
-except Exception:
-    _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+def set_authorization(code: str = "", dev_code: str = "") -> bool:
+    """注册 HslCommunication（需注册的 dll 版本才有 Authorization 成员）。
+
+    code/device 敏感 → 仅供运行时显式传入（env/配置），不进源码/仓库。
+    免费/开源 dll 无该方法 → 返回 False 并提示。
+    """
+    try:
+        import HslCommunication as _H
+    except Exception:
+        return False
+    _Auth = getattr(_H, "Authorization", None)
+    if _Auth is None:
+        print("[plc] 当前 HslCommunication.dll 无授权 API（免注册版），跳过授权",
+              flush=True)
+        return False
+    try:
+        _Auth.SetAuthorization(code, dev_code)
+        return True
+    except Exception as e:
+        print("[plc] 授权失败:", e, flush=True)
+        return False
+
+
+def _autoload_auth() -> None:
+    """构造前自动注册：环境变量 HRVISION_HSL_AUTH="公司码:设备码"。"""
+    v = os.environ.get("HRVISION_HSL_AUTH", "").strip()
+    if not v:
+        return
+    code, _, dev = v.partition(":")
+    set_authorization(code, dev)
 
 
 def hrvision_bin_dir() -> str:
-    """框架内置 PLC 环境目录(HRVision/bin,与相机 DLL 同库惯例)。"""
-    d = os.path.join(_PKG_DIR, "bin")
-    return d if os.path.isdir(d) else ""
-
-
-def hrvision_has_plc_lib() -> bool:
-    """框架 bin 内是否含 PLCInterface.pyd(回退库)。"""
-    return bool(hrvision_bin_dir()) and os.path.isfile(
-        os.path.join(hrvision_bin_dir(), "PLCInterface.pyd"))
+    """框架内置 DLL 环境（HRVision/bin，与相机 DLL 同库惯例）。"""
+    try:
+        import HRVision as _pkg
+        d = os.path.join(os.path.dirname(os.path.abspath(_pkg.__file__)), "bin")
+        return d if os.path.isdir(d) else ""
+    except Exception:
+        return ""
 
 
 def ensure_managed_dll() -> str:
-    """HslCommunication.dll(C# 托管库)自动补放到 CLR 解析基准(python.exe 所在目录)。
+    """HslCommunication.dll 补放到 CLR 解析基准（python.exe 所在目录）。
 
-    实测:托管库解析基准 = 进程基目录(环境根), bin/sys.path 注册都不覆盖——
-    旧经验「放 HRVision 环境目录才可用」由此而来。本函数在基准缺失时从源
-    (HRVision/bin → PLC_LIB_DIR 环境变量 → 旧编译目录)复制一份。
+    实测：托管库解析基准 = 进程基目录（环境根）——bin/sys.path 注册都不覆盖。
+    基准缺失时从源（HRVision/bin → PLC_LIB_DIR → 旧编译目录）复制一份。
     """
     src = ""
-    for d in (hrvision_bin_dir(), os.environ.get("PLC_LIB_DIR", "")) + _LEGACY_DIRS:
+    for d in (hrvision_bin_dir(), os.environ.get("PLC_LIB_DIR", ""),
+              r"D:/Python/cModule/PLCInterface/build/bin/Release"):
         c = os.path.join(d, "HslCommunication.dll") if d else ""
         if c and os.path.isfile(c):
             src = c
@@ -64,27 +95,47 @@ def ensure_managed_dll() -> str:
     if not os.path.isfile(dst):
         try:
             shutil.copy2(src, dst)
-            print("[plc] HslCommunication.dll 已补放到环境根(CLR 解析基准)", flush=True)
+            print("[plc] HslCommunication.dll 已补放到环境根（CLR 解析基准）", flush=True)
         except Exception:
             pass
     return dst
 
 
-def _search_plc_dirs() -> list:
-    out = []
-    for d in (hrvision_bin_dir(), os.environ.get("PLC_LIB_DIR", "")) + _LEGACY_DIRS:
-        if d and d not in out and os.path.isdir(d):
-            out.append(d)
-    return out
+class _Vendor:
+    """厂商定义：类名 + 构造形态（实测 pythonnet 重载序列）。"""
+
+    def __init__(self, cls, ctor="ip_port", default_port=5000):
+        self.cls = cls
+        self.ctor = ctor            # ip_port / plctype_ip_port / ip_only
+        self.default_port = default_port
+
+
+def _vendor_table(clr_H) -> "dict[str, _Vendor]":
+    """protocol 名 → _Vendor。类名平铺 HslCommunication 根（本 DLL 实测形态）。"""
+    return {
+        "modbus": _Vendor(clr_H.ModbusTcpNet, "ip_port", 502),
+        "modbus_rtu": _Vendor(clr_H.ModbusRtuOverTcp, "ip_port", 502),
+        "siemens_s7": _Vendor(clr_H.SiemensS7Net, "plctype_ip", 102),
+        "siemens_fetch_write": _Vendor(clr_H.SiemensFetchWriteNet, "ip_port", 102),
+        "melsec_mc": _Vendor(clr_H.MelsecMcNet, "ip_port", 6000),
+        "melsec_mc_ascii": _Vendor(clr_H.MelsecMcAsciiNet, "ip_port", 6000),
+        "melsec_a1e": _Vendor(clr_H.MelsecA1ENet, "ip_port", 6000),
+        "omron_fins": _Vendor(clr_H.OmronFinsNet, "ip_port", 8500),
+        "allen_bradley": _Vendor(clr_H.AllenBradleyNet, "ip_port", 44818),
+    }
+
+
+def _resolve_s7_type(_H, plc_type) -> object:
+    """西门子 plcType 解析（'S1200'/'S300'/'s200smart'… → SiemensPLCS 枚举）。"""
+    name = str(plc_type or "S1200").upper().replace("-", "").replace("_", "")
+    for cand in ("S1200", "S1500", "S400", "S300", "S200SMART", "S200"):
+        if name == cand.replace("_", ""):
+            return getattr(_H.SiemensPLCS, cand)
+    return _H.SiemensPLCS.S1200
 
 
 class ClrPlc:
-    """直连 C# 后端(pythonnet + HslCommunication.dll——绕过 pyd/C++/CLI 中间件)。
-
-    实测全链路:clr.AddReference → ModbusTcpNet(host,port) → ConnectServer →
-    ReadBool/Write(string,bool) 回环一致;托管解析由 pythonnet 钩子承载,
-    无环境根 DLL 约束(ensure_managed_dll 仅为双保险)。
-    """
+    """直连 C# 后端（pythonnet + HslCommunication.dll，唯一后端——无 pyd 中间件）。"""
 
     _loaded = False
 
@@ -92,33 +143,42 @@ class ClrPlc:
     def _ensure(cls) -> None:
         if cls._loaded:
             return
-        import clr
-        for _d in _search_plc_dirs():
-            ensure_managed_dll()
-            try:
-                for part in ("HslCommunication.dll", "PLCDevice.dll"):
-                    p = os.path.join(_d, part)
-                    if os.path.isfile(p):
-                        clr.AddReference(p)
-                cls._loaded = True
-                return
-            except Exception:
-                continue
-        # 基准目录直加(纯托管库,无附带依赖)
-        for _d in (_search_plc_dirs() or ["."]):
-            try:
-                clr.AddReference(_d)
-                cls._loaded = True
-                return
-            except Exception:
-                continue
-        raise ImportError("HslCommunication.dll 未找到(请置于 HRVision/bin 或 PLC_LIB_DIR)")
+        try:
+            import clr
+        except ImportError:
+            raise RuntimeError("pythonnet 未安装（pip install pythonnet）")
+        _d = hrvision_bin_dir() or os.environ.get("PLC_LIB_DIR", "")
+        for part in ("HslCommunication.dll",):
+            p = os.path.join(_d, part) if _d else ""
+            if p and os.path.isfile(p):
+                clr.AddReference(p)
+        else:
+            clr.AddReference("HslCommunication")   # 已装环境（pip/全局）时兜底
+        cls._loaded = True
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 9000):
+    def __init__(self, protocol: str = "modbus", host: str = "127.0.0.1",
+                 port: int = 0, plc_type=None):
         self._ensure()
-        import HslCommunication.ModBus as _mb
-        self._net = _mb.ModbusTcpNet(host, port)
+        _autoload_auth()
+        import HslCommunication as _H
+        v = _vendor_table(_H).get((protocol or "modbus").lower())
+        if v is None:
+            raise ValueError("未知厂商协议: %r（可用: %s）"
+                             % (protocol, ", ".join(sorted(_vendor_table(_H)))))
+        self._protocol = (protocol or "modbus").lower()
+        self._port = int(port or v.default_port)
+        # 构造形态（pythonnet 重载序列实测）
+        if v.ctor == "plctype_ip":                       # 西门子 (pltype, ip)
+            self._net = v.cls(_resolve_s7_type(_H, plc_type), host)
+        elif v.ctor == "ip_port":
+            self._net = v.cls(host, self._port)
+        else:                                            # ip_only
+            self._net = v.cls(host)
         self._conn = False
+
+    @property
+    def protocol(self) -> str:
+        return self._protocol
 
     def connect(self) -> bool:
         try:
@@ -130,21 +190,56 @@ class ClrPlc:
     def is_connected(self) -> bool:
         return self._conn
 
-    def read_coil(self, addr) -> bool:
+    # ---- 统一读/写（各厂地址语法透传；值类型按 API 分） ----
+
+    def read_bool(self, addr) -> bool:
         try:
             r = self._net.ReadBool(str(addr))
             return bool(r.IsSuccess and r.Content)
         except Exception:
             return False
 
-    def write_coil(self, addr, on: bool) -> bool:
+    def write_bool(self, addr, on: bool) -> bool:
         try:
-            return bool(self._net.Write(str(addr), bool(on)).IsSuccess)
+            return bool(self._net.WriteBool(str(addr), bool(on)).IsSuccess)
         except Exception:
             return False
 
+    def read_int16(self, addr):
+        try:
+            r = self._net.ReadInt16(str(addr))
+            return int(r.Content) if r.IsSuccess else None
+        except Exception:
+            return None
+
+    def write_int16(self, addr, value) -> bool:
+        try:
+            return bool(self._net.WriteInt16(str(addr), int(value)).IsSuccess)
+        except Exception:
+            return False
+
+    def read_string(self, addr) -> "str | None":
+        try:
+            r = self._net.ReadString(str(addr))
+            return str(r.Content) if r.IsSuccess else None
+        except Exception:
+            return None
+
+    def write_string(self, addr, s: str) -> bool:
+        try:
+            return bool(self._net.WriteString(str(addr), str(s)).IsSuccess)
+        except Exception:
+            return False
+
+    # ---- Modbus 语义（地址 "0"/寄存区 ReadHoldingRegisters） ----
+
+    def read_coil(self, addr) -> bool:
+        return self.read_bool(addr)
+
+    def write_coil(self, addr, on: bool) -> bool:
+        return self.write_bool(addr, on)
+
     def read_register(self, addr, count: int = 1):
-        """保持寄存器读(3 区;按 HslCommunication 地址语义,可读/写区)。"""
         try:
             r = self._net.ReadHoldingRegisters(str(addr), int(count))
             return list(r.Content) if r.IsSuccess else None
@@ -157,7 +252,6 @@ class ClrPlc:
         except Exception:
             return False
 
-    # 兼容别名(coil 语义)
     read_bit = read_coil
     write_bit = write_coil
 
@@ -168,109 +262,28 @@ class ClrPlc:
             pass
 
 
-class PydPlc:
-    """回退后端:C++/CLI pyd(PLCInterface)——历史环境/无 pythonnet 时使用(惰性加载)。"""
-
-    def __init__(self, plc_type: str = "Modbus", host: str = "127.0.0.1",
-                 port: int = 9000, name: str = "hrvision"):
-        import PLCInterface
-        self._plc = PLCInterface.PLC()
-        ensure_managed_dll()
-        self._plc.createTcp(name, plc_type, host, port)
-
-    def connect(self) -> bool:
-        try:
-            return bool(self._plc.openConnection())
-        except Exception:
-            return False
-
-    def is_connected(self) -> bool:
-        try:
-            return bool(self._plc.isConnected())
-        except Exception:
-            return False
-
-    def read_coil(self, addr) -> bool:
-        try:
-            v = self._plc.readNumber(str(addr), "bool")
-            return str(v).strip().lower() in ("1", "true")
-        except Exception:
-            return False
-
-    def write_coil(self, addr, on: bool) -> bool:
-        try:
-            self._plc.writeNumber(str(addr), "1" if on else "0", "bool")
-            return True
-        except Exception:
-            return False
-
-    read_bit = read_coil
-    write_bit = write_coil
-
-    def read_register(self, addr, count: int = 1):
-        try:
-            return [self._plc.readNumber(str(int(addr) + i), "int16")
-                    for i in range(count)]
-        except Exception:
-            return None
-
-    def write_register(self, addr, value) -> bool:
-        try:
-            self._plc.writeNumber(str(addr), str(int(value)), "int16")
-            return True
-        except Exception:
-            return False
-
-    def close(self):
-        try:
-            self._plc.close()
-        except Exception:
-            pass
-
-
-def backend_status() -> str:
-    """当前环境后端探测(无副作用):'clr'(直连 C#)/'pyd'(回退)/'none'。"""
-    try:
-        ClrPlc._ensure()
-        return "clr"
-    except Exception:
-        pass
-    try:
-        import PLCInterface
-        return "pyd"
-    except Exception:
-        return "none"
-
-
 class Plc:
-    """PLC 客户端统一门:构造时探测后端——CLR(直连 C#,推荐)优先,pyd 回退。
+    """PLC 客户端统一门：**CLR 直连（pythonnet + HslCommunication）**，无 pyd 回退。
 
-    统一接口(地址型):
-        conn = Plc("Modbus", "127.0.0.1", 9000)
-        conn.connect() / conn.read_coil("0") / conn.write_coil("0", True) /
-        conn.read_register("0") / conn.write_register("0", 1) / conn.close()
-    业务位名映射(I/O 表)在项目层(services/plc.py)包一层,此处不感知。
+    用法：
+        conn = Plc("siemens_s7", "192.168.0.10")     # 默认端口随厂商
+        conn = Plc("modbus", "127.0.0.1", 502)
+        conn.connect() / read_bool / write_bool / read_int16 / write_int16 / ...
+        业务位名映射（I/O 表）在项目层，地址语法按厂商（见模块 docstring）。
     """
 
-    def __init__(self, plc_type: str = "Modbus", host: str = "127.0.0.1",
-                 port: int = 9000, name: str = "hrvision"):
+    def __init__(self, protocol: str = "modbus", host: str = "127.0.0.1",
+                 port: int = 0, plc_type=None):
         ensure_managed_dll()
-        try:
-            self._impl = ClrPlc(host, port)
-            self._backend = "clr"
-        except Exception as e:
-            try:
-                self._impl = PydPlc(plc_type, host, port, name)
-                self._backend = "pyd"
-            except Exception as e2:
-                raise RuntimeError(
-                    "PLC 后端不可用: CLR(%s) / pyd(%s) —— 请安装 pythonnet+"
-                    "HslCommunication 或 PLCInterface.pyd" % (e, e2)) from e2
+        self._impl = ClrPlc(protocol, host, port, plc_type)
 
     @property
     def backend(self) -> str:
-        """实际后端: 'clr' / 'pyd'。"""
-        return self._backend
+        return "clr"
+
+    @property
+    def protocol(self) -> str:
+        return self._impl.protocol
 
     def connect(self) -> bool:
         return self._impl.connect()
@@ -278,20 +291,39 @@ class Plc:
     def is_connected(self) -> bool:
         return self._impl.is_connected()
 
-    def read_coil(self, addr) -> bool:
-        return self._impl.read_coil(addr)
+    def read_bool(self, addr) -> bool:
+        return self._impl.read_bool(addr)
 
-    def write_coil(self, addr, on: bool) -> bool:
-        return self._impl.write_coil(addr, on)
+    def write_bool(self, addr, on: bool) -> bool:
+        return self._impl.write_bool(addr, on)
 
-    read_bit = read_coil     # 兼容别名
+    def read_int16(self, addr):
+        return self._impl.read_int16(addr)
+
+    def write_int16(self, addr, value) -> bool:
+        return self._impl.write_int16(addr, value)
+
+    def read_string(self, addr):
+        return self._impl.read_string(addr)
+
+    def write_string(self, addr, s: str) -> bool:
+        return self._impl.write_string(addr, s)
+
+    read_coil = ClrPlc.read_coil     # 仅 Modbus 语义下有效（地址透传）
+    write_coil = ClrPlc.write_coil
+    read_register = ClrPlc.read_register
+    write_register = ClrPlc.write_register
+    read_bit = read_coil
     write_bit = write_coil
-
-    def read_register(self, addr, count: int = 1):
-        return self._impl.read_register(addr, count)
-
-    def write_register(self, addr, value) -> bool:
-        return self._impl.write_register(addr, value)
 
     def close(self):
         self._impl.close()
+
+
+def backend_status() -> str:
+    """当前环境后端探测（无副作用）：'clr'（可用）/ 'none'（缺 pythonnet/dll）。"""
+    try:
+        ClrPlc._ensure()
+        return "clr"
+    except Exception:
+        return "none"
