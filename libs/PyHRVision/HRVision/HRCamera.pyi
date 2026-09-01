@@ -75,6 +75,14 @@ class Camera:
         """
         设置增益
         """
+    def SetDeviceIp(self, ip: str, mask: str, gateway: str = "") -> tuple[bool, str]:
+        """
+        修改相机 IP（GigE；成功后需重新打开相机；掩码必填，网关可空）
+        """
+    def SetDeviceIpMode(self, mode: str) -> tuple[bool, str]:
+        """
+        设置 IP 模式（"static"/"dhcp"/"lla"；不支持时返回失败提示）
+        """
     def SetReciveBufferCallback(self, callback: typing.Callable[[collections.abc.Sequence[numpy.ndarray], typing.Any], None], context: typing.Any = None) -> None:
         """
         设置接收数据回调

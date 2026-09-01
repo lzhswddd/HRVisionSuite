@@ -124,6 +124,7 @@ CMD_INFO = "info"
 CMD_GET_TREE = "get_tree"    # 参数树查询（GetParameterTree → 数据点 cam1.param_tree 回传）
 CMD_SET_CONFIG = "set_config"  # 配置连接参数（扫描选设备后生效；不动运行状态）
 CMD_GET_VALUE = "get_value"    # 单节点读值（改值后精确回读更新，免全量刷新）
+CMD_SET_DEVICE_IP = "set_device_ip"  # 设置设备网络参数（GigE：设备 IP / IP 模式；改后需重开相机）
 
 
 def enumerate_devices(camera_type: str, producer: str = "") -> list:
@@ -337,9 +338,39 @@ class CameraWorker:
             self._do_set_config(payload)
         elif cmd == CMD_GET_VALUE:
             self._do_get_value(payload)
+        elif cmd == CMD_SET_DEVICE_IP:
+            self._do_set_device_ip(payload)
         else:
             self._emit_event("未知命令: %s" % cmd)
         self._emit_state()
+
+    def _do_set_device_ip(self, payload) -> None:
+        """设置设备网络参数（GigE）：payload {ip,mask,gateway} 或 {mode: static/dhcp/lla}。
+
+        各厂商 DLL 统一接口 SetDeviceIp/SetDeviceIpMode（CameraInterface 扩展）；
+        成功后设备句柄失效 → 提示重新打开相机。
+        """
+        if self.host is None or self.host.dev is None:
+            self._emit_event("设置设备IP失败: 相机未打开")
+            return
+        payload = payload or {}
+        mode = str(payload.get("mode") or "")
+        try:
+            if mode:
+                ok, msg = self.host._ext("SetDeviceIpMode", mode)
+            else:
+                ok, msg = self.host._ext("SetDeviceIp",
+                                         str(payload.get("ip") or ""),
+                                         str(payload.get("mask") or ""),
+                                         str(payload.get("gateway") or ""))
+        except Exception as e:
+            ok, msg = False, str(e)
+        print("[cam] 设置设备IP(ip=%s mode=%s) → %s | %s"
+              % (payload.get("ip") or "-", mode or "-", ok, msg), flush=True)
+        if ok:
+            self._emit_event("设置设备IP成功: %s" % msg)
+        else:
+            self._emit_event("设置设备IP失败: %s" % msg)
 
     def _do_get_value(self, payload) -> None:
         """单节点读值 → 数据点回传（改值后精确更新树对应行）。"""
@@ -434,14 +465,21 @@ class CameraWorker:
         self._emit_event("相机打开%s: %s" % ("成功" if ok else "失败", msg))
 
     def _do_close(self) -> None:
+        """关闭相机（软关闭）：停推流 + 释放连接；实例与配置保留——可直接再 open/start。
+
+        与 destroy 的区别：close 只关连接（host 保留、created=True）；
+        卸载/换源走 destroy。
+        """
         if self.host is None:
             return
         self.host.stop()
-        self.host.close()
-        self.host = None
-        self.created = False
+        try:
+            ok, msg = self.host.close()
+        except Exception as e:
+            ok, msg = False, str(e)
         self.running = False
-        self._emit_event("相机已关闭")
+        self._emit_event("相机已关闭（%s）" % ("可打开" if ok else str(msg)))
+
 
     def _do_destroy(self) -> None:
         """销毁相机：关闭 + 释放实例全部引用（可再 new 其他类型/来源）。"""
