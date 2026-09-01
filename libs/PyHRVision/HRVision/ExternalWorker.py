@@ -98,8 +98,11 @@ def serve_forever(handler, host: str = "127.0.0.1",
 class ExternalWorker:
     """外部工具进程客户端：拉起 → 握手 → 请求/响应 → 崩溃自动重启。
 
-    线程安全（call 串行）；call 时检测到连接断开或进程退出会自动重启并重试
-    （restart_retries 次），适合长生命周期 worker（模型加载一次、之后每帧调用）。
+    线程安全（**实例级串行**：同一实例的 call 全程排队执行——send+recv+
+    自动重启均在同一锁内，并发调用不会打乱帧协议；多线程需要并行吞吐时
+    用多个实例，每个实例一个工作通道）。call 时检测到连接断开或进程退出
+    会自动重启并重试（restart_retries 次），适合长生命周期 worker
+    （模型加载一次、之后每帧调用）。
     """
 
     def __init__(self, launch: list, ready_prefix: str = "READY",
@@ -110,7 +113,8 @@ class ExternalWorker:
         self.ready_timeout = ready_timeout  # 就绪等待上限（秒）
         self.log_path = log_path            # stderr 重定向文件（None = 继承）
         self.restart_retries = restart_retries  # call 失败自动重启重试次数
-        self._lock = threading.Lock()
+        # RLock：call 全程持锁，内部再调 start/close（各再拿锁）不冲突
+        self._lock = threading.RLock()
         self._proc: "subprocess.Popen | None" = None
         self._sock: "socket.socket | None" = None
 
@@ -136,6 +140,9 @@ class ExternalWorker:
             self._start_stdout_drain()
             self._sock = socket.create_connection(("127.0.0.1", port), timeout=30)
             self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # recv 超时护栏（无界等待 = 静默式卡死）：超时抛 ConnectionError，
+            # 由 call 的自动重启路径接管（重试/恢复，绝不无限挂等）
+            self._sock.settimeout(30)
 
     def close(self) -> None:
         """关闭连接并终止进程（幂等）。"""
@@ -160,21 +167,26 @@ class ExternalWorker:
 
         payload 可为 bytes（单条）或 list[bytes]（多段请求——worker 端按段
         recv_msg 接收，如「帧头 + 帧数据」两段协议）。
+
+        线程安全：**全程持 _lock**（send+recv+自动重启原子）——同一实例
+        多线程并发 call 排队串行，帧协议不被并发写/读打乱（旧版无锁：
+        并发 sendall 混流 + 并发 recv 抢边界 → 应答错乱/无限挂等 → 静默）。
         """
         parts = payload if isinstance(payload, (list, tuple)) else [payload]
-        for attempt in range(self.restart_retries + 1):
-            try:
-                self.start()
-                assert self._sock is not None
-                for p in parts:
-                    send_msg(self._sock, p)
-                return recv_msg(self._sock)
-            except (ConnectionError, OSError, RuntimeError) as e:
-                self.close()
-                if attempt >= self.restart_retries:
-                    raise
-                time.sleep(0.2)   # 重启间隔（等端口释放）
-        raise RuntimeError("外部工具调用失败")   # unreachable
+        with self._lock:
+            for attempt in range(self.restart_retries + 1):
+                try:
+                    self.start()
+                    assert self._sock is not None
+                    for p in parts:
+                        send_msg(self._sock, p)
+                    return recv_msg(self._sock)
+                except (ConnectionError, OSError, RuntimeError) as e:
+                    self.close()
+                    if attempt >= self.restart_retries:
+                        raise
+                    time.sleep(0.2)   # 重启间隔（等端口释放）
+            raise RuntimeError("外部工具调用失败")   # unreachable
 
     # ---------- 内部 ----------
 
